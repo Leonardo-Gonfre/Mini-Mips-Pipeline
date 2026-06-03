@@ -200,6 +200,7 @@ void estagio_EX(CPU *cpu) {}
 void estagio_ID(CPU *cpu) {}
 void estagio_IF(CPU *cpu) {}
 int pipeline_vazio(CPU *cpu) {}
+void salva_snap(CPU *cpu) {}
 
 void executa_ciclo(CPU *cpu) {}
 void volta_ciclo(CPU *cpu) {}
