@@ -1,0 +1,18 @@
+CC      = gcc
+CFLAGS  = -Wall -Wextra -std=c11 -g
+TARGET  = simulador_pipeline
+SRC     = simulador_pipeline.c
+
+.PHONY: all run clean
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC)
+	@echo "Compilado com sucesso: $(TARGET)"
+
+run: $(TARGET)
+	./$(TARGET)
+
+clean:
+	rm -f $(TARGET) $(TARGET).exe
