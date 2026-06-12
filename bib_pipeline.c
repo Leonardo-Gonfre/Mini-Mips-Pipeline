@@ -264,13 +264,16 @@ void print_banco(CPU *cpu) {
     printf("| %4s | %6d |\n", cpu->banco->nome[i], (int)cpu->banco->reg[i]);
   printf("+------+--------+\n");
 }
+
 void print_pipeline(CPU *cpu) {}
 void estagio_WB(CPU *cpu) {}
 void estagio_MEM(CPU *cpu) {}
 void estagio_EX(CPU *cpu) {}
-
 void estagio_ID(CPU *cpu) {}
 void estagio_IF(CPU *cpu) {}
+
+void print_inst(const Instrucao *raw, char *buf) { disassembla(raw, buf); }
+
 int pipeline_vazio(CPU *cpu) {
   return (cpu->if_id.valida + cpu->id_ex.valida + cpu->ex_mem.valida +
           cpu->mem_wb.valida) == 0;
@@ -390,13 +393,14 @@ void reinicia(CPU *cpu) {
   printf("Pipeline reiniciado. PC=0, registradores zerados.\n");
 }
 
+void salva_dat(CPU *cpu) {}
+
 void print_stats(CPU *cpu) {
   printf("\n======== ESTATISTICAS ========\n");
   printf("Ciclos totais         : %d\n", cpu->ciclos);
   printf("Instrucoes decodif.   : %d\n", cpu->stats.total);
   printf("Instrucoes completas  : %d\n", cpu->stats.completas);
 
-  /* CPI = Cycles Per Instruction (ideal pipeline = 1.0) */
   if (cpu->stats.completas > 0 && cpu->ciclos > 0)
     printf("CPI (ciclos/completas): %.2f\n",
            (float)cpu->ciclos / (float)cpu->stats.completas);
