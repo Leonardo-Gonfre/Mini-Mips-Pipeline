@@ -3,21 +3,21 @@ int main(void) {
     /* --------------------------------------------------------
        Alocação do estado da CPU
        -------------------------------------------------------- */
-    CPU      *cpu  = (CPU *)      calloc(1, sizeof(CPU));
-    MemInst  *mi   = (MemInst *)  calloc(1, sizeof(MemInst));
-    MemDados *md   = (MemDados *) calloc(1, sizeof(MemDados));
-    Banco    *bnc  = (Banco *)    calloc(1, sizeof(Banco));
-    Snap     *hist = (Snap *)     calloc(MAX_HIST, sizeof(Snap));
+    CPU *cpu =(CPU*)calloc(1, sizeof(CPU));
+    MemInst *mi =(MemInst*)calloc(1,sizeof(MemInst));
+    MemDados *md =(MemDados*)calloc(1,sizeof(MemDados));
+    Banco *bnc =(Banco*)calloc(1,sizeof(Banco));
+    Snap *hist =(Snap*)calloc(MAX_HIST,sizeof(Snap));
 
     if (!cpu || !mi || !md || !bnc || !hist) {
         fprintf(stderr, "Erro: sem memoria suficiente.\n");
         return 1;
     }
 
-    cpu->mem_inst  = mi;
+    cpu->mem_inst = mi;
     cpu->mem_dados = md;
-    cpu->banco     = bnc;
-    cpu->hist      = hist;
+    cpu->banco = bnc;
+    cpu->hist = hist;
     inicializa_banco(cpu);
 
     print_header();
@@ -64,10 +64,10 @@ int main(void) {
                 print_stats(cpu);
                 break;
 
-            case 9:  reinicia(cpu);   break;
-            case 10: salva_dat(cpu);  break;
+            case 9: reinicia(cpu); break;
+            case 10: salva_dat(cpu); break;
             case 11: print_stats(cpu); break;
-            case 0:  printf("Encerrando simulador.\n"); break;
+            case 0: printf("Encerrando simulador.\n"); break;
             default: printf("Opcao invalida.\n"); break;
         }
     } while (op != 0);
@@ -75,7 +75,7 @@ int main(void) {
     /* --------------------------------------------------------
        Liberação de memória
        -------------------------------------------------------- */
-    if (cpu->mem_inst->inst)   free(cpu->mem_inst->inst);
+    if (cpu->mem_inst->inst) free(cpu->mem_inst->inst);
     if (cpu->mem_dados->dados) free(cpu->mem_dados->dados);
     free(cpu->mem_inst);
     free(cpu->mem_dados);
