@@ -39,7 +39,7 @@ int main(void) {
                     break; 
                 }
                 if (!cpu->rodando && pipeline_vazio(cpu) && cpu->pc >= cpu->mem_inst->tamanho) { 
-                    printf("Execucao ja concluida. Use opcao 9 para reiniciar.\n");
+                    printf("Execucao ja concluida. Use opcao 6 para reiniciar.\n");
                     break;
                 }
                 if (!cpu->rodando && cpu->pc < cpu->mem_inst->tamanho) { cpu->rodando = 1; }
@@ -52,17 +52,17 @@ int main(void) {
                 print_pipeline(cpu);
             break;
             case 6: reinicia(cpu); break;
-            case 7:
-                print_mem_inst(cpu);
-                print_mem_dat(cpu);
-            break;
-            case 8: print_banco(cpu); break;
-            case 9: print_pipeline(cpu); break;
-            case 10: print_stats(cpu); break;
-            case 11: salva_dat(cpu);  break;
+            case 7:  print_mem_inst(cpu);      break;  // Mem. Instrucoes
+            case 8:  print_mem_dat(cpu);       break;  // Mem. Dados
+            case 9:  print_mem_ambas(cpu);     break;  // Mem. Instrucoes + Dados
+            case 10: print_regs_pipeline(cpu); break;  // Banco + Regs Pipeline
+            case 11: print_pipeline(cpu);      break;  // Diagrama Pipeline
+            case 12: print_stats(cpu);         break;  // Estatisticas
+            case 13: salva_dat(cpu);           break;  // Salvar .dat
             case 0: printf("Encerrando simulador.\n"); break;
             default: printf("Opcao invalida.\n"); break;
         }
+
     } while (menu != 0);
 
     // LIBERACAO DE MEMORIA
