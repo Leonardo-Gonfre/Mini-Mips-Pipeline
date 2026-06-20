@@ -1,0 +1,10 @@
+# Teste 2: MEM Forwarding — distancia 2 entre escritor e leitor
+#
+# addi $r1, $r0, 9   →  opcode=0100 rs=000($r0) rt=001($r1) imm=001001(9)
+# addi $r3, $r0, 1   →  opcode=0100 rs=000($r0) rt=011($r3) imm=000001(1)  [separador]
+# add  $r2, $r1, $r3 →  opcode=0000 rs=001($r1) rt=011($r3) rd=010($r2) fn=000(ADD)
+#
+# Esperado: $r1=9, $r3=1, $r2=10  |  stalls=0, forwards>=1, flushes=0
+0100000001001001
+0100000011000001
+0000001011010000
