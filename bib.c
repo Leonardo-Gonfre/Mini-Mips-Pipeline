@@ -24,13 +24,14 @@ int bits_imm(const char *b, int ini, int nBits) {
   return sign_ext(separa_bits(b, ini, nBits), nBits);
 }
 int bits_jump(const char *b) { return separa_bits(b, 4, 12) & 0xFF; }
+
 void inicializa_cpu(CPU *cpu) {
   cpu->pc = cpu->ciclos = cpu->rodando = cpu->i_hist = cpu->stall = 0;
-  // Memorias
+  /*// Memorias
   memset(cpu->mem_inst->inst, 0, MAX_MEM * sizeof(Instrucao));
   cpu->mem_inst->tamanho = 0;
   memset(cpu->mem_dados->dados, 0, MAX_MEM * sizeof(int));
-  cpu->mem_dados->tamanho = 0;
+  cpu->mem_dados->tamanho = 0;*/
   // Banco de registradores
   memset(cpu->banco->reg, 0, sizeof(cpu->banco->reg));
   cpu->banco->nome[0] = "$r0";
@@ -113,6 +114,7 @@ void carrega_mem(CPU *cpu) {
   printf("%d instrucoes carregadas.\n", cpu->mem_inst->tamanho);
   fclose(p);
 }
+
 void carrega_dat(CPU *cpu) {
   char arq[128];
   printf("Arquivo .dat: ");
@@ -150,6 +152,7 @@ void carrega_dat(CPU *cpu) {
   printf("%d valores carregados.\n", cpu->mem_dados->tamanho);
   fclose(p);
 }
+
 void salva_dat(CPU *cpu) {
   char arq[128];
   printf("Arquivo de saida (.dat): ");
@@ -256,6 +259,7 @@ Sinais decoder(Instrucao *inst) {
   }
   return s;
 }
+
 void disassembla(const Instrucao *inst, char *buf) {
   if (!inst->valida) {
     strcpy(buf, "--- (bolha)");
@@ -608,13 +612,16 @@ void executa_ciclo(CPU *cpu) {
   // Detecta hazards ANTES de executar os estagios
   detecta_hazard(cpu);
 
-  // (Ordem de execucao: WB -> MEM -> EX -> ID -> IF)
+  // (Ordem correta: WB -> FORWARD -> MEM -> EX -> ID -> IF)
+  // O forwarding deve rodar ANTES de MEM e EX:
+  //   - MEM sobrescreve mem_wb (perderia o MEM hazard se rodasse antes)
+  //   - EX consome id_ex (sem o forward, usaria valores desatualizados)
   estagio_WB(cpu);
-  estagio_MEM(cpu);
 
-  // Aplica forwarding antes de EX usar os dados
+  // Aplica forwardings (ANTES de MEM e EX)
   forwarding_unit(cpu);
 
+  estagio_MEM(cpu);
   estagio_EX(cpu);
   estagio_ID(cpu);
   estagio_IF(cpu);
@@ -667,20 +674,22 @@ void reinicia(CPU *cpu) {
 
 // PRINTs
 void print_menu(void) {
-  printf("\n+----------- MENU ------------+\n"
-         "| 1. Carregar .mem            |\n"
-         "| 2. Carregar .dat            |\n"
-         "| 3. Executar programa (Run)  |\n"
-         "| 4. Executar um ciclo (Step) |\n"
-         "| 5. Voltar ciclo (Back Step) |\n"
-         "| 6. Reiniciar                |\n"
-         "| 7. Imprimir memorias        |\n"
-         "| 8. Imprimir registradores   |\n"
-         "| 9. Imprimir pipeline        |\n"
-         "|10. Estatisticas             |\n"
-         "|11. Salvar .dat              |\n"
-         "| 0. Sair                     |\n"
-         "+-----------------------------+\n"
+  printf("\n+------------ MENU -----------------+\n"
+         "| 1. Carregar intruções(.mem)         |\n"
+         "| 2. Carregar dados(.dat)             |\n"
+         "| 3. Executar programa (Run)          |\n"
+         "| 4. Executar um ciclo (Step)         |\n"
+         "| 5. Voltar ciclo (Back Step)         |\n"
+         "| 6. Resetar o programa               |\n"
+         "| 7. Imprimir Mem. Instrucoes         |\n"
+         "| 8. Imprimir Mem. Dados              |\n"
+         "| 9. Imprimir Mem. Instrucoes + Dados |\n"
+         "|10. Imprimir Registradores           |\n"
+         "|11. Imprimir Pipeline                |\n"
+         "|12. Estatisticas                     |\n"
+         "|13. Salvar .dat                      |\n"
+         "| 0. Sair                             |\n"
+         "+---------------------------------+\n"
          "Opcao: ");
 }
 void print_inst(const Instrucao *raw, char *buf) {
@@ -693,6 +702,10 @@ void print_inst(const Instrucao *raw, char *buf) {
   disassembla(&tmp, buf);
 }
 void print_mem_inst(CPU *cpu) {
+  if (!cpu->mem_inst->inst) {
+    printf("[Mem. Instrucoes] Nao carregada. Use opcao 1.\n");
+    return;
+  }
   char asm_buf[64];
   printf("\n+------+------------------+----------------------------------------"
          "--+\n");
@@ -709,6 +722,10 @@ void print_mem_inst(CPU *cpu) {
   printf("Total: %d instrucoes\n", cpu->mem_inst->tamanho);
 }
 void print_mem_dat(CPU *cpu) {
+  if (!cpu->mem_dados->dados) {
+    printf("[Mem. Dados] Nao carregada. Use opcao 2.\n");
+    return;
+  }
   printf("\n+------+--------+\n");
   printf("| Addr |  Valor |\n");
   printf("+------+--------+\n");
@@ -718,6 +735,10 @@ void print_mem_dat(CPU *cpu) {
   printf("+------+--------+\n");
   printf("Total: %d posicoes\n", cpu->mem_dados->tamanho);
 }
+void print_mem_ambas(CPU *cpu) {
+  print_mem_inst(cpu);
+  print_mem_dat(cpu);
+}
 void print_banco(CPU *cpu) {
   printf("\n+------+--------+\n");
   printf("| Reg  |  Valor |\n");
@@ -726,8 +747,76 @@ void print_banco(CPU *cpu) {
     printf("| %4s | %6d |\n", cpu->banco->nome[i], (int)cpu->banco->reg[i]);
   printf("+------+--------+\n");
 }
+void print_regs_pipeline(CPU *cpu) {
+  char buf[64];
+
+  /* --- Banco de Registradores --- */
+  printf("\n+========== BANCO DE REGISTRADORES ==========+\n");
+  printf("| Reg  |  Valor |\n");
+  printf("+------+--------+\n");
+  for (int i = 0; i < MAX_REG; i++)
+    printf("| %4s | %6d |\n", cpu->banco->nome[i], (int)cpu->banco->reg[i]);
+  printf("+------+--------+\n");
+
+  /* --- IF/ID --- */
+  print_inst(&cpu->if_id.inst, buf);
+  printf("\n+========== REG IF/ID (%s) ==========+\n",
+         cpu->if_id.valida ? "valido" : "bolha");
+  printf("  Instrucao : %s\n", buf);
+  printf("  PC+1      : %d\n", cpu->if_id.pc_mais1);
+
+  /* --- ID/EX --- */
+  disassembla(&cpu->id_ex.inst, buf);
+  if (!cpu->id_ex.valida)
+    strcpy(buf, "--- (bolha)");
+  printf("\n+========== REG ID/EX (%s) ==========+\n",
+         cpu->id_ex.valida ? "valido" : "bolha");
+  printf("  Instrucao : %s\n", buf);
+  printf("  dado_rs   : %d\n", cpu->id_ex.dado_rs);
+  printf("  dado_rt   : %d\n", cpu->id_ex.dado_rt);
+  printf("  imm       : %d\n", cpu->id_ex.imm);
+  printf("  reg_dest  : $r%d\n", cpu->id_ex.reg_dest);
+  printf("  PC+1      : %d\n", cpu->id_ex.pc_mais1);
+  printf("  Sinais    : esc_reg = %d, esc_mem = %d, mem2reg = %d, ula_src =%d "
+         "branch=%d "
+         "jump=%d ctrl_ula=%d\n",
+         cpu->id_ex.s.esc_reg, cpu->id_ex.s.esc_mem, cpu->id_ex.s.mem_para_reg,
+         cpu->id_ex.s.ula_fonte, cpu->id_ex.s.branch, cpu->id_ex.s.jump,
+         cpu->id_ex.s.ctrl_ula);
+
+  /* --- EX/MEM --- */
+  disassembla(&cpu->ex_mem.inst, buf);
+  if (!cpu->ex_mem.valida)
+    strcpy(buf, "--- (bolha)");
+  printf("\n+========== REG EX/MEM (%s) ==========+\n",
+         cpu->ex_mem.valida ? "valido" : "bolha");
+  printf("  Instrucao   : %s\n", buf);
+  printf("  resultado   : %d\n", cpu->ex_mem.resultado_ula);
+  printf("  flag_zero   : %d\n", cpu->ex_mem.flag_zero);
+  printf("  dado_rt     : %d\n", cpu->ex_mem.dado_rt);
+  printf("  reg_dest    : $r%d\n", cpu->ex_mem.reg_dest);
+  printf("  Sinais      : esc_reg = %d, esc_mem = %d, mem2reg = %d, branch = "
+         "%d;\n",
+         cpu->ex_mem.s.esc_reg, cpu->ex_mem.s.esc_mem,
+         cpu->ex_mem.s.mem_para_reg, cpu->ex_mem.s.branch);
+
+  /* --- MEM/WB --- */
+  disassembla(&cpu->mem_wb.inst, buf);
+  if (!cpu->mem_wb.valida)
+    strcpy(buf, "--- (bolha)");
+  printf("\n+========== REG MEM/WB (%s) ==========+\n",
+         cpu->mem_wb.valida ? "valido" : "bolha");
+  printf("  Instrucao   : %s\n", buf);
+  printf("  result_ula  : %d\n", cpu->mem_wb.resultado_ula);
+  printf("  result_mem  : %d\n", cpu->mem_wb.resultado_mem);
+  printf("  reg_dest    : $r%d\n", cpu->mem_wb.reg_dest);
+  printf("  Sinais      : esc_reg = %d mem2reg=%d\n", cpu->mem_wb.s.esc_reg,
+         cpu->mem_wb.s.mem_para_reg);
+  printf("\n");
+}
+
 void print_pipeline(CPU *cpu) {
-  char b0[64], b1[64], b2[64], b3[64];
+  char b0[64], b1[64], b2[64], b3[64], b4[64];
 
   /* IF/ID: instrução ainda não decodificada — decodifica cópia para display */
   print_inst(&cpu->if_id.inst, b0);
@@ -746,6 +835,18 @@ void print_pipeline(CPU *cpu) {
   if (!cpu->mem_wb.valida)
     strcpy(b3, "--- (bolha)");
 
+  /* WB: exibe a instrucao que WB processou neste ciclo.
+   * Como estagio_MEM() ja sobrescreveu mem_wb, usamos o snapshot
+   * salvo no inicio do ciclo (hist[i_hist-1]) para recuperar o valor anterior.
+   */
+  if (cpu->i_hist > 0) {
+    Snap *prev = &cpu->hist[cpu->i_hist - 1];
+    disassembla(&prev->mem_wb.inst, b4);
+    if (!prev->mem_wb.valida)
+      strcpy(b4, "--- (bolha)");
+  } else {
+    strcpy(b4, "--- (bolha)");
+  }
   printf(
       "\n+-------+-----------------------------------------------------------+"
       "\n"
@@ -760,7 +861,7 @@ void print_pipeline(CPU *cpu) {
       "|   WB   | %-57s|\n" // WB processa o que está em MEM/WB
       "+--------+-----------------------------------------------------------+"
       "\n",
-      cpu->ciclos, cpu->pc, cpu->stats.completas, b0, b1, b2, b3, b3);
+      cpu->ciclos, cpu->pc, cpu->stats.completas, b0, b1, b2, b3, b4);
 }
 void print_stats(CPU *cpu) {
   printf("\n======== ESTATISTICAS ========\n"

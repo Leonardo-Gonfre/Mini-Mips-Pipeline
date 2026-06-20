@@ -125,6 +125,8 @@ void print_inst(const Instrucao *raw, char *buf);
 void print_mem_inst(CPU *cpu);
 void print_mem_dat(CPU *cpu);
 void print_banco(CPU *cpu);
+void print_mem_ambas(CPU *cpu);
+void print_regs_pipeline(CPU *cpu);
 void print_pipeline(CPU *cpu);
 void print_stats(CPU *cpu);
 

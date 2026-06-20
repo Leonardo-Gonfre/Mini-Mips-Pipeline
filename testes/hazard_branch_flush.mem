@@ -1,0 +1,15 @@
+# Teste 4: Branch BEQ Tomado (Flush)
+#
+# [0] addi $r1, $r0, 3  →  opcode=0100 rs=000 rt=001 imm=000011(3)
+# [1] addi $r2, $r0, 3  →  opcode=0100 rs=000 rt=010 imm=000011(3)
+# [2] beq  $r1, $r2, 1  →  opcode=1000 rs=001($r1) rt=010($r2) imm=000001(1)
+#                            branch tomado ($r1==$r2): PC = (2+1)+1 = 4 → salta inst[3]
+# [3] addi $r4, $r0, 99 →  DESCARTADA (flush)  imm=1100011(99) mas 6bits max=63, usar 63
+# [4] addi $r4, $r0, 7  →  destino do branch, $r4=7
+#
+# Esperado: $r1=3, $r2=3, $r3=0, $r4=7  |  stalls=0, flushes=1
+0100000001000011
+0100000010000011
+1000001010000001
+0100000100111111
+0100000100000111
