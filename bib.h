@@ -35,7 +35,7 @@ typedef struct {
 } MemDados;
 
 typedef struct {
-  signed char reg[MAX_REG];
+  int reg[MAX_REG];
   const char *nome[MAX_REG];
 } Banco;
 
@@ -72,16 +72,21 @@ typedef struct {
 
 typedef struct {
   int pc, ciclos, dados[MAX_MEM];
-  signed char reg[MAX_REG];
+  int reg[MAX_REG];
   Reg_IFID if_id;
   Reg_IDEX id_ex;
   Reg_EXMEM ex_mem;
   Reg_MEMWB mem_wb;
+  Instrucao wb_last;
+  int wb_last_valida;
+  char cycle_log[1024];
+  int cycle_log_len;
   Stats stats;
 } Snap;
 typedef struct {
   int pc, ciclos, i_hist;
   int rodando; // 1 = pipeline em execução, 0 = parado/concluído
+  int quiet;   // 1 = não imprimir saída de texto (modo ncurses)
   int stall;   // 1 = stall ativo (load-use hazard), congela IF e IF/ID
   MemInst *mem_inst;
   MemDados *mem_dados;
@@ -108,6 +113,9 @@ void inicializa_cpu(CPU *cpu);
 void carrega_mem(CPU *cpu);
 void carrega_dat(CPU *cpu);
 void salva_dat(CPU *cpu);
+int  carrega_mem_filename(CPU *cpu, const char *arq);
+int  carrega_dat_filename(CPU *cpu, const char *arq);
+int  salva_dat_filename(CPU *cpu, const char *arq);
 int ula(int A, int B, int ctrl, int *ovf, int *zero);
 Sinais decoder(Instrucao *inst);
 void estagio_WB(CPU *cpu);

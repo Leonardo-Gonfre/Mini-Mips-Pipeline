@@ -5,8 +5,7 @@
 
 void limpa_buf(void) {
   int c;
-  while ((c = getchar()) != '\n' && c != EOF)
-    ;
+  while ((c = getchar()) != '\n' && c != EOF);
 }
 int separa_bits(const char *b, int ini, int n) {
   int val = 0;
@@ -165,6 +164,71 @@ void salva_dat(CPU *cpu) {
   }
   fclose(f);
   printf("Salvo em '%s' (%d posicoes).\n", arq, cpu->mem_dados->tamanho);
+}
+
+// Ncurses
+int carrega_mem_filename(CPU *cpu, const char *arq) {
+  FILE *p = fopen(arq, "r");
+  if (!p)
+    return -1;
+  cpu->mem_inst->tamanho = 0;
+  if (cpu->mem_inst->inst)
+    memset(cpu->mem_inst->inst, 0, MAX_MEM * sizeof(Instrucao));
+  char buf[32];
+  int linha = 0;
+  while (fscanf(p, "%31s", buf) == 1) {
+    linha++;
+    if (buf[0] == '#') {
+      while (!feof(p) && fgetc(p) != '\n')
+        ;
+      continue;
+    }
+    int len = (int)strlen(buf);
+    if (len != 16)
+      continue;
+    int ok = 1;
+    for (int i = 0; i < 16 && ok; i++)
+      if (buf[i] != '0' && buf[i] != '1')
+        ok = 0;
+    if (!ok)
+      continue;
+    if (cpu->mem_inst->tamanho >= MAX_MEM)
+      break;
+    int idx = cpu->mem_inst->tamanho;
+    strncpy(cpu->mem_inst->inst[idx].bin, buf, 16);
+    cpu->mem_inst->inst[idx].bin[16] = '\0';
+    cpu->mem_inst->inst[idx].valida = 1;
+    cpu->mem_inst->tamanho++;
+  }
+  fclose(p);
+  return cpu->mem_inst->tamanho;
+}
+int carrega_dat_filename(CPU *cpu, const char *arq) {
+  FILE *p = fopen(arq, "r");
+  if (!p)
+    return -1;
+  if (cpu->mem_dados->dados) {
+    free(cpu->mem_dados->dados);
+    cpu->mem_dados->dados = (int *)calloc(MAX_MEM, sizeof(int));
+  }
+  cpu->mem_dados->tamanho = 0;
+  int val;
+  while (fscanf(p, "%d", &val) == 1) {
+    if (cpu->mem_dados->tamanho >= MAX_MEM)
+      break;
+    cpu->mem_dados->dados[cpu->mem_dados->tamanho++] = val;
+  }
+  fclose(p);
+  return cpu->mem_dados->tamanho;
+}
+int salva_dat_filename(CPU *cpu, const char *arq) {
+  FILE *f = fopen(arq, "w");
+  if (!f)
+    return -1;
+  for (int i = 0; i < cpu->mem_dados->tamanho; i++)
+    fprintf(f, "%d\n", cpu->mem_dados->dados[i]);
+  fclose(f);
+  return cpu->mem_dados->tamanho;
 }
 
 Sinais decoder(Instrucao *inst) {
@@ -337,7 +401,7 @@ void estagio_WB(CPU *cpu) {
   // Escreve no banco de registradores (esc_reg=0 na bolha, nao escreve)
   if (r->s.esc_reg && r->reg_dest > 0 && r->reg_dest < MAX_REG) {
     int val = r->s.mem_para_reg ? r->resultado_mem : r->resultado_ula;
-    cpu->banco->reg[r->reg_dest] = (signed char)(val & 0xFF);
+    cpu->banco->reg[r->reg_dest] = val;
   }
   // Estatistica
   if (r->inst.valida) {
@@ -372,6 +436,9 @@ void estagio_MEM(CPU *cpu) {
     int addr = ex->resultado_ula;
     if (addr >= 0 && addr < MAX_MEM && cpu->mem_dados->dados) {
       cpu->mem_dados->dados[addr] = (int)(signed char)(ex->dado_rt & 0xFF);
+      if (addr >= cpu->mem_dados->tamanho) {
+        cpu->mem_dados->tamanho = addr + 1;
+      }
     } else {
       printf("[MEM] Endereco invalido (SW): %d\n", addr);
     }
@@ -515,19 +582,21 @@ void estagio_IF(CPU *cpu) {
     return;
   }
 
-  if (cpu->pc < cpu->mem_inst->tamanho) {
-    f->inst = cpu->mem_inst->inst[cpu->pc];
-    f->inst.valida = 1;
-    f->pc_mais1 = cpu->pc + 1;
-    f->valida = 1;
-    f->bolha = 0;
+  if (cpu->pc < MAX_MEM) {
+    if (cpu->pc < cpu->mem_inst->tamanho) {
+      f->inst = cpu->mem_inst->inst[cpu->pc];
+      f->inst.valida = 1;
+      f->pc_mais1 = cpu->pc + 1;
+      f->valida = 1;
+      f->bolha = 0;
+    } else {
+      // Fim das instrucoes: continua drenando o pipeline e incrementando o PC
+      f->valida = 0;
+      f->bolha = 0;
+      memset(&f->inst, 0, sizeof(Instrucao));
+      f->pc_mais1 = cpu->pc;
+    }
     cpu->pc++;
-  } else {
-    // Fim das instrucoes: NAO e bolha, apenas drenagem do pipeline
-    f->valida = 0;
-    f->bolha = 0;
-    memset(&f->inst, 0, sizeof(Instrucao));
-    f->pc_mais1 = cpu->pc;
   }
 }
 
@@ -645,25 +714,24 @@ void detecta_hazard(CPU *cpu) {
 }
 
 int pipeline_vazio(CPU *cpu) {
-  return !cpu->if_id.valida && !cpu->id_ex.valida && !cpu->ex_mem.valida &&
-         !cpu->mem_wb.valida;
+  return !cpu->if_id.valida && !cpu->id_ex.valida && !cpu->ex_mem.valida && !cpu->mem_wb.valida;
 }
 
 void salva_snap(CPU *cpu) {
-  // OBS PILHA
-  if (cpu->i_hist >= 256)
-    return;
+  if (cpu->i_hist >= 256) {return;}
   Snap *s = &cpu->hist[cpu->i_hist++];
   s->pc = cpu->pc;
   s->ciclos = cpu->ciclos;
-  memcpy(s->reg, cpu->banco->reg, MAX_REG * sizeof(signed char));
-  if (cpu->mem_dados->dados) {
-    memcpy(s->dados, cpu->mem_dados->dados, MAX_MEM * sizeof(int));
-  }
+  memcpy(s->reg, cpu->banco->reg, MAX_REG * sizeof(int));
+  if (cpu->mem_dados->dados) {memcpy(s->dados, cpu->mem_dados->dados, MAX_MEM * sizeof(int));}
   s->if_id = cpu->if_id;
   s->id_ex = cpu->id_ex;
   s->ex_mem = cpu->ex_mem;
   s->mem_wb = cpu->mem_wb;
+  s->wb_last = cpu->wb_last;
+  s->wb_last_valida = cpu->wb_last_valida;
+  memcpy(s->cycle_log, cpu->cycle_log, sizeof(cpu->cycle_log));
+  s->cycle_log_len = cpu->cycle_log_len;
   s->stats = cpu->stats;
 }
 
@@ -675,10 +743,10 @@ void executa_ciclo(CPU *cpu) {
   cpu->cycle_log_len = 0;
 
   // Executa estagios (stall vem da deteccao do ciclo anterior)
-  // (Ordem de execucao: WB -> MEM -> forwarding -> EX -> ID -> IF)
+  // (Ordem de execucao: WB -> forwarding -> MEM -> EX -> ID -> IF)
   estagio_WB(cpu);
-  estagio_MEM(cpu);
   forwarding_unit(cpu);
+  estagio_MEM(cpu);
   estagio_EX(cpu);
   estagio_ID(cpu);
   estagio_IF(cpu);
@@ -688,8 +756,10 @@ void executa_ciclo(CPU *cpu) {
   // (simula logica combinacional que opera sobre os registradores atualizados)
   detecta_hazard(cpu);
 
-  // Verifica termino: sem instrucoes para buscar E pipeline vazio
-  if (cpu->pc >= cpu->mem_inst->tamanho && pipeline_vazio(cpu)) {
+  // O programa deve continuar rodando até atingir a posição limite de instruções.
+  // Se o PC já alcançou o fim da memória, o pipeline continua drenando, mas não
+  // deve parar antes de chegar ao limite de 255 posições.
+  if (cpu->pc >= MAX_MEM) {
     cpu->rodando = 0;
   }
 }
@@ -698,15 +768,16 @@ void executa_programa(CPU *cpu) {
   while (cpu->rodando) {
     executa_ciclo(cpu);
   }
-  printf("\nExecucao concluida em %d ciclos (%d instrucoes completas).\n",
-         cpu->ciclos, cpu->stats.completas);
+  if (!cpu->quiet) {
+    printf("\nFim por limite de memória.\n");
+  }
 }
 void volta_ciclo(CPU *cpu) {
   // OBS PILHA
   Snap *s = &cpu->hist[--cpu->i_hist];
   cpu->pc = s->pc;
   cpu->ciclos = s->ciclos;
-  memcpy(cpu->banco->reg, s->reg, MAX_REG * sizeof(signed char));
+  memcpy(cpu->banco->reg, s->reg, MAX_REG * sizeof(int));
   if (cpu->mem_dados->dados) {
     memcpy(cpu->mem_dados->dados, s->dados, MAX_MEM * sizeof(int));
   }
@@ -714,9 +785,15 @@ void volta_ciclo(CPU *cpu) {
   cpu->id_ex = s->id_ex;
   cpu->ex_mem = s->ex_mem;
   cpu->mem_wb = s->mem_wb;
+  cpu->wb_last = s->wb_last;
+  cpu->wb_last_valida = s->wb_last_valida;
+  memcpy(cpu->cycle_log, s->cycle_log, sizeof(cpu->cycle_log));
+  cpu->cycle_log_len = s->cycle_log_len;
   cpu->stats = s->stats;
   cpu->rodando = 1;
-  printf("Ciclo desfeito. PC=%d | Ciclo=%d\n", cpu->pc, cpu->ciclos);
+  if (!cpu->quiet) {
+    printf("Ciclo desfeito. PC=%d | Ciclo=%d\n", cpu->pc, cpu->ciclos);
+  }
 }
 void reinicia(CPU *cpu) {
   cpu->pc = cpu->ciclos = cpu->rodando = cpu->i_hist = cpu->stall = 0;
@@ -724,6 +801,9 @@ void reinicia(CPU *cpu) {
   memset(&cpu->id_ex, 0, sizeof(Reg_IDEX));
   memset(&cpu->ex_mem, 0, sizeof(Reg_EXMEM));
   memset(&cpu->mem_wb, 0, sizeof(Reg_MEMWB));
+  cpu->wb_last_valida = 0;
+  cpu->cycle_log[0] = '\0';
+  cpu->cycle_log_len = 0;
   memset(cpu->banco->reg, 0, sizeof(cpu->banco->reg));
   memset(&cpu->stats, 0, sizeof(Stats));
   if (cpu->mem_dados->dados)
@@ -732,7 +812,9 @@ void reinicia(CPU *cpu) {
   if (cpu->mem_inst->inst)
     memset(cpu->mem_inst->inst, 0, MAX_MEM * sizeof(Instrucao));
   cpu->mem_inst->tamanho = 0;
-  printf("Pipeline e memorias reinicializados.\n");
+  if (!cpu->quiet) {
+    printf("Pipeline e memorias reinicializados.\n");
+  }
 }
 
 // PRINTs
@@ -789,10 +871,6 @@ void print_mem_dat(CPU *cpu) {
   }
   printf("+------+--------+\n");
 }
-void print_mem_ambas(CPU *cpu) {
-  print_mem_inst(cpu);
-  print_mem_dat(cpu);
-}
 void print_banco(CPU *cpu) {
   printf("\n+------+--------+\n");
   printf("| Reg  |  Valor |\n");
@@ -843,7 +921,7 @@ void print_pipeline(CPU *cpu) {
   }
   printf("%s", sep);
 
-  /* ---- IF/ID ---- */
+  // IF/ID
   printf("%s", sep);
   printf("| [IF/ID]%-70s|\n", cpu->stall ? " (STALL)" : "");
   printf("%s", lin);
@@ -855,7 +933,7 @@ void print_pipeline(CPU *cpu) {
     printf("| Instrucao: (bolha)%-59s|\n", "");
   }
 
-  /* ---- ID/EX ---- */
+  // ID/EX
   printf("%s", sep);
   printf("| [ID/EX]%-70s|\n", "");
   printf("%s", lin);
@@ -869,7 +947,7 @@ void print_pipeline(CPU *cpu) {
     print_sinais(&zero_s);
   }
 
-  /* ---- EX/MEM ---- */
+  // EX/MEM
   printf("%s", sep);
   printf("| [EX/MEM]%-69s|\n", "");
   printf("%s", lin);
@@ -883,7 +961,7 @@ void print_pipeline(CPU *cpu) {
     print_sinais(&zero_s);
   }
 
-  /* ---- MEM/WB ---- */
+  // MEM/WB
   printf("%s", sep);
   printf("| [MEM/WB]%-69s|\n", "");
   printf("%s", lin);
@@ -897,7 +975,7 @@ void print_pipeline(CPU *cpu) {
     print_sinais(&zero_s);
   }
 
-  /* ---- WB (processado neste ciclo) ---- */
+  // WB (processado neste ciclo)
   printf("%s", sep);
   printf("| Instrucao finalizada neste ciclo: ");
   if (cpu->wb_last_valida) {
@@ -910,7 +988,7 @@ void print_pipeline(CPU *cpu) {
   }
   printf("%s", sep);
 
-  /* ---- Comentarios: hazards e forwards ---- */
+  // Comentarios: hazards e forwards
   if (cpu->cycle_log_len > 0) {
     printf("\n--- Eventos neste ciclo ---\n");
     printf("%s", cpu->cycle_log);
