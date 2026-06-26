@@ -42,21 +42,21 @@ typedef struct {
 // REGISTRADORES DE PIPELINE
 typedef struct {
   Instrucao inst;
-  int pc_mais1, valida;
+  int pc_mais1, valida, bolha;
 } Reg_IFID;
 typedef struct {
   Instrucao inst;
-  int dado_rs, dado_rt, imm, reg_dest, pc_mais1, valida;
+  int dado_rs, dado_rt, imm, reg_dest, pc_mais1, valida, bolha;
   Sinais s;
 } Reg_IDEX;
 typedef struct {
   Instrucao inst;
-  int resultado_ula, dado_rt, reg_dest, flag_zero, valida;
+  int resultado_ula, dado_rt, reg_dest, flag_zero, valida, bolha;
   Sinais s;
 } Reg_EXMEM;
 typedef struct {
   Instrucao inst;
-  int reg_dest, resultado_mem, resultado_ula, valida;
+  int reg_dest, resultado_mem, resultado_ula, valida, bolha;
   Sinais s;
 } Reg_MEMWB;
 
@@ -92,6 +92,10 @@ typedef struct {
   Reg_MEMWB mem_wb;
   Stats stats;
   Snap *hist;
+  Instrucao wb_last;      // instrução que saiu do WB neste ciclo
+  int wb_last_valida;     // 1 se wb_last é real
+  char cycle_log[1024];  // log de eventos do ciclo (hazards/forwards)
+  int cycle_log_len;     // tamanho atual do log
 } CPU;
 
 // PROTOTIPOS
@@ -126,7 +130,6 @@ void print_mem_inst(CPU *cpu);
 void print_mem_dat(CPU *cpu);
 void print_banco(CPU *cpu);
 void print_mem_ambas(CPU *cpu);
-void print_regs_pipeline(CPU *cpu);
 void print_pipeline(CPU *cpu);
 void print_stats(CPU *cpu);
 
