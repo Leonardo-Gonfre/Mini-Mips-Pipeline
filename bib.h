@@ -63,6 +63,7 @@ typedef struct {
 typedef struct {
   int total;     // instruções decodificadas (excluindo bolhas)
   int completas; // instruções que passaram pelo WB
+  int buscadas;  // instruções buscadas pelo estágio IF
   int tipo_r, tipo_i, tipo_j;
   int add, sub, and_op, or_op, addi, lw, sw_op, beq, jump;
   int stalls;   // bolhas inseridas por load-use hazard
@@ -79,6 +80,8 @@ typedef struct {
   Reg_MEMWB mem_wb;
   Instrucao wb_last;
   int wb_last_valida;
+  int stall; // estado do stall no momento do snapshot
+  int flush_pending;  // estado do flush_pending no momento do snapshot
   char cycle_log[1024];
   int cycle_log_len;
   Stats stats;
@@ -88,6 +91,7 @@ typedef struct {
   int rodando; // 1 = pipeline em execução, 0 = parado/concluído
   int quiet;   // 1 = não imprimir saída de texto (modo ncurses)
   int stall;   // 1 = stall ativo (load-use hazard), congela IF e IF/ID
+  int flush_pending; // número de bolhas a inserir após um branch/jump tomado
   MemInst *mem_inst;
   MemDados *mem_dados;
   Banco *banco;

@@ -49,7 +49,7 @@ static char gstatus[256]="Carregue um arquivo .mem (opcao 1).";
 
 static void init_colors(void){
   start_color();
-  init_pair(CP_HDR, COLOR_WHITE,  COLOR_BLUE);
+  init_pair(CP_HDR, COLOR_WHITE,  COLOR_BLACK);
   init_pair(CP_SEL, COLOR_BLACK,  COLOR_CYAN);
   init_pair(CP_NRM, COLOR_WHITE,  COLOR_BLACK);
   init_pair(CP_OK,  COLOR_GREEN,  COLOR_BLACK);
@@ -137,7 +137,8 @@ static void draw_foot(void){
 static void draw_stage(WINDOW *w,int *row,const char *name,
   const Instrucao *inst,const Sinais *s,int is_bubble,
   int show_ula,int ula_res,int ula_zero,
-  int show_dest,int reg_dest,int show_mem,int mem_res,int stall_flag)
+  int show_dest,int reg_dest,int show_mem,int mem_res,int stall_flag,
+  int stage_type)
 {
   int mw; int dummy; getmaxyx(w,dummy,mw); (void)dummy;
   int bw=mw-2;
@@ -162,14 +163,27 @@ static void draw_stage(WINDOW *w,int *row,const char *name,
     (*row)++;
     if(*row>=MH-1) return;
 
-    /* Exibe sinais zerados para bolha */
+    /* Exibe sinais zerados para bolha (filtrados por estagio) */
     wattron(w,COLOR_PAIR(CP_SIG));
-    mvwprintw(w,*row,2,"| Sinais: RegDst=%-1d UlaFte=%-1d EscReg=%-1d EscMem=%-1d%*s|",
-      0,0,0,0,bw-42,"");
-    (*row)++;
-    if(*row<MH-1){
-      mvwprintw(w,*row,2,"|         Branch=%-1d  Jump=%-1d   Mem2Reg=%-1d  CtrlULA=%-1d%*s|",
-        0,0,0,0,bw-48,"");
+    if(stage_type <= 1){
+      /* IF/ID e ID/EX: todos os sinais */
+      mvwprintw(w,*row,2,"| Sinais: RegDst=%-1d UlaFte=%-1d EscReg=%-1d EscMem=%-1d%*s|",
+        0,0,0,0,bw-42,"");
+      (*row)++;
+      if(*row<MH-1){
+        mvwprintw(w,*row,2,"|         Branch=%-1d  Jump=%-1d   MemToReg=%-1d  CtrlULA=%-1d%*s|",
+          0,0,0,0,bw-48,"");
+        (*row)++;
+      }
+    } else if(stage_type == 2){
+      /* EX/MEM: sinais MEM+WB (EX ja consumidos) */
+      mvwprintw(w,*row,2,"| Sinais: EscReg=%-1d EscMem=%-1d MemToReg=%-1d%*s|",
+        0,0,0,bw-34,"");
+      (*row)++;
+    } else {
+      /* MEM/WB: so sinais WB */
+      mvwprintw(w,*row,2,"| Sinais: EscReg=%-1d MemToReg=%-1d%*s|",
+        0,0,bw-25,"");
       (*row)++;
     }
     wattroff(w,COLOR_PAIR(CP_SIG));
@@ -182,11 +196,12 @@ static void draw_stage(WINDOW *w,int *row,const char *name,
     }
     if(show_dest && *row<MH-1){
       wattron(w,COLOR_PAIR(CP_REG));
-      mvwprintw(w,*row,2,"| Destino: $r%-1d  EscReg=%-1d  Mem2Reg=%-1d%*s|",
-        0,0,0,bw-36,"");
       if(show_mem)
-        mvwprintw(w,*row,2,"| Dest:$r%-1d  Mem2Reg:%-1d  result_mem=%-6d%*s|",
+        mvwprintw(w,*row,2,"| Dest:$r%-1d  MemToReg:%-1d  result_mem=%-6d%*s|",
           0,0,0,bw-42,"");
+      else
+        mvwprintw(w,*row,2,"| Destino: $r%-1d  EscReg=%-1d  MemToReg=%-1d%*s|",
+          0,0,0,bw-36,"");
       wattroff(w,COLOR_PAIR(CP_REG));
       (*row)++;
     }
@@ -208,13 +223,26 @@ static void draw_stage(WINDOW *w,int *row,const char *name,
   if(!is_bubble && inst->valida && s){
     wattron(w,COLOR_PAIR(CP_SIG));
     static const char *cn[]={"ADD","SUB","AND","OR"};
-    mvwprintw(w,*row,2,"| Sinais: RegDst=%-1d UlaFte=%-1d EscReg=%-1d EscMem=%-1d%*s|",
-      s->reg_destino,s->ula_fonte,s->esc_reg,s->esc_mem,bw-42,"");
-    (*row)++;
-    if(*row<MH-1){
-      mvwprintw(w,*row,2,"|         Branch=%-1d  Jump=%-1d   Mem2Reg=%-1d  CtrlULA=%s%*s|",
-        s->branch,s->jump,s->mem_para_reg,
-        (s->ctrl_ula<4?cn[s->ctrl_ula]:"?"),bw-48,"");
+    if(stage_type <= 1){
+      /* IF/ID e ID/EX: todos os sinais */
+      mvwprintw(w,*row,2,"| Sinais: RegDst=%-1d UlaFte=%-1d EscReg=%-1d EscMem=%-1d%*s|",
+        s->reg_destino,s->ula_fonte,s->esc_reg,s->esc_mem,bw-42,"");
+      (*row)++;
+      if(*row<MH-1){
+        mvwprintw(w,*row,2,"|         Branch=%-1d  Jump=%-1d   MemToReg=%-1d  CtrlULA=%s%*s|",
+          s->branch,s->jump,s->mem_para_reg,
+          (s->ctrl_ula<4?cn[s->ctrl_ula]:"?"),bw-48,"");
+        (*row)++;
+      }
+    } else if(stage_type == 2){
+      /* EX/MEM: sinais MEM+WB (EX ja consumidos) */
+      mvwprintw(w,*row,2,"| Sinais: EscReg=%-1d EscMem=%-1d MemToReg=%-1d%*s|",
+        s->esc_reg,s->esc_mem,s->mem_para_reg,bw-34,"");
+      (*row)++;
+    } else {
+      /* MEM/WB: so sinais WB */
+      mvwprintw(w,*row,2,"| Sinais: EscReg=%-1d MemToReg=%-1d%*s|",
+        s->esc_reg,s->mem_para_reg,bw-25,"");
       (*row)++;
     }
     wattroff(w,COLOR_PAIR(CP_SIG));
@@ -226,11 +254,12 @@ static void draw_stage(WINDOW *w,int *row,const char *name,
     }
     if(show_dest && *row<MH-1){
       wattron(w,COLOR_PAIR(CP_REG));
-      mvwprintw(w,*row,2,"| Destino: $r%-1d  EscReg=%-1d  Mem2Reg=%-1d%*s|",
-        reg_dest,s->esc_reg,s->mem_para_reg,bw-36,"");
       if(show_mem)
-        mvwprintw(w,*row,2,"| Dest:$r%-1d  Mem2Reg:%-1d  result_mem=%-6d%*s|",
+        mvwprintw(w,*row,2,"| Dest:$r%-1d  MemToReg:%-1d  result_mem=%-6d%*s|",
           reg_dest,s->mem_para_reg,mem_res,bw-42,"");
+      else
+        mvwprintw(w,*row,2,"| Destino: $r%-1d  EscReg=%-1d  MemToReg=%-1d%*s|",
+          reg_dest,s->esc_reg,s->mem_para_reg,bw-36,"");
       wattroff(w,COLOR_PAIR(CP_REG));
       (*row)++;
     }
@@ -265,22 +294,30 @@ static void draw_pipeline(CPU *cpu){
   row+=2;
 
   /* IF/ID */
-  draw_stage(wctr,&row,"IF/ID",&cpu->if_id.inst,NULL,
-    cpu->if_id.bolha,0,0,0,0,0,0,0,cpu->stall);
+  {
+    Sinais ifid_s;
+    memset(&ifid_s, 0, sizeof(Sinais));
+    if(!cpu->if_id.bolha && cpu->if_id.inst.valida){
+      Instrucao tmp_ifid = cpu->if_id.inst;
+      ifid_s = decoder(&tmp_ifid);
+    }
+    draw_stage(wctr,&row,"IF/ID",&cpu->if_id.inst,&ifid_s,
+      cpu->if_id.bolha,0,0,0,0,0,0,0,cpu->stall,0);
+  }
 
   /* ID/EX */
   draw_stage(wctr,&row,"ID/EX",&cpu->id_ex.inst,&cpu->id_ex.s,
-    cpu->id_ex.bolha,0,0,0,0,0,0,0,0);
+    cpu->id_ex.bolha,0,0,0,0,0,0,0,0,1);
 
   /* EX/MEM */
   draw_stage(wctr,&row,"EX/MEM",&cpu->ex_mem.inst,&cpu->ex_mem.s,
     cpu->ex_mem.bolha,
-    1,cpu->ex_mem.resultado_ula,cpu->ex_mem.flag_zero,0,0,0,0,0);
+    1,cpu->ex_mem.resultado_ula,cpu->ex_mem.flag_zero,0,0,0,0,0,2);
 
   /* MEM/WB */
   draw_stage(wctr,&row,"MEM/WB",&cpu->mem_wb.inst,&cpu->mem_wb.s,
     cpu->mem_wb.bolha,0,0,0,
-    1,cpu->mem_wb.reg_dest,1,cpu->mem_wb.resultado_mem,0);
+    1,cpu->mem_wb.reg_dest,1,cpu->mem_wb.resultado_mem,0,3);
 
   /* WB concluido */
   if(row<MH-2 && cpu->wb_last_valida){
@@ -306,7 +343,7 @@ static void draw_regs(CPU *cpu){
 static void draw_events(CPU *cpu){
   werase(wevt);
   box(wevt,0,0);
-  mvwprintw(wevt,0,3," EVENTOS ");
+  mvwprintw(wevt,0,3," HAZARDS ");
   int row=1;
   int pw=RGHT_W-4; /* largura util do painel */
   char *p=cpu->cycle_log;
@@ -441,11 +478,14 @@ static void draw_mem_dat(CPU *cpu){
 
 static void draw_stats(CPU *cpu){
   werase(wctr); box(wctr,0,0);
+  wattron(wctr,COLOR_PAIR(CP_NRM));
   mvwprintw(wctr,0,3," ESTATISTICAS ");
+  wattroff(wctr,COLOR_PAIR(CP_NRM));
   int r=1;
   float cpi=cpu->stats.completas>0?(float)cpu->ciclos/cpu->stats.completas:0;
   wattron(wctr,COLOR_PAIR(CP_OK)|A_BOLD);
   mvwprintw(wctr,r++,2,"Ciclos totais:       %d",cpu->ciclos);
+  mvwprintw(wctr,r++,2,"Inst. buscadas:      %d",cpu->stats.buscadas);
   mvwprintw(wctr,r++,2,"Inst. decodificadas: %d",cpu->stats.total);
   mvwprintw(wctr,r++,2,"Inst. completas:     %d",cpu->stats.completas);
   mvwprintw(wctr,r++,2,"CPI:                 %.2f",cpi);

@@ -27,7 +27,7 @@ int bits_imm(const char *b, int ini, int nBits) {
 int bits_jump(const char *b) { return separa_bits(b, 4, 12) & 0xFF; }
 
 void inicializa_cpu(CPU *cpu) {
-  cpu->pc = cpu->ciclos = cpu->rodando = cpu->i_hist = cpu->stall = 0;
+  cpu->pc = cpu->ciclos = cpu->rodando = cpu->i_hist = cpu->stall = cpu->flush_pending = 0;
   // Memorias
   if (!cpu->mem_inst->inst) {
     cpu->mem_inst->inst = (Instrucao *)calloc(MAX_MEM, sizeof(Instrucao));
@@ -468,26 +468,26 @@ void estagio_EX(CPU *cpu) {
   // Resolucao de Branch/Jump (branch=0 e jump=0 na bolha, nao desvia)
   if (id->s.jump) {
     cpu->pc = id->inst.addr;
-    cpu->if_id.valida = 0;
-    cpu->if_id.bolha = 1;
-    memset(&cpu->if_id.inst, 0, sizeof(Instrucao));
+    cpu->flush_pending = 2;
+    ex->valida = id->valida;
+    ex->bolha = 0;
     cpu->stats.flushes++;
     cpu->cycle_log_len += snprintf(
         cpu->cycle_log + cpu->cycle_log_len,
         sizeof(cpu->cycle_log) - cpu->cycle_log_len,
-        "  !! FLUSH (jump): penalidade de 1 ciclo, PC redirecionado para %d\n",
+        "  !! FLUSH (jump): PC redirecionado para %d\n",
         id->inst.addr);
   } else if (id->s.branch && ex->flag_zero) {
     int target = id->pc_mais1 + id->imm;
     cpu->pc = target;
-    cpu->if_id.valida = 0;
-    cpu->if_id.bolha = 1;
-    memset(&cpu->if_id.inst, 0, sizeof(Instrucao));
+    cpu->flush_pending = 2;
+    ex->valida = id->valida;
+    ex->bolha = 0;
     cpu->stats.flushes++;
     cpu->cycle_log_len += snprintf(cpu->cycle_log + cpu->cycle_log_len,
                                    sizeof(cpu->cycle_log) - cpu->cycle_log_len,
-                                   "  !! FLUSH (branch tomado): penalidade de "
-                                   "1 ciclo, PC redirecionado para %d\n",
+                                   "  !! FLUSH (branch tomado): PC "
+                                   "redirecionado para %d\n",
                                    target);
   }
 }
@@ -495,8 +495,29 @@ void estagio_ID(CPU *cpu) {
   Reg_IFID *f = &cpu->if_id;
   Reg_IDEX *id = &cpu->id_ex;
 
+  if (cpu->flush_pending == 2) {
+    memset(id, 0, sizeof(Reg_IDEX));
+    id->valida = 0;
+    id->bolha = 1;
+    cpu->flush_pending = 1;
+    return;
+  }
+
   // Se ha stall (load-use hazard): insere bolha no ID/EX e congela IF/ID
   if (cpu->stall) {
+    Instrucao tmp_stall = f->inst;
+    Sinais s_stall = decoder(&tmp_stall);
+    int dest_lw = cpu->id_ex.s.reg_destino ? cpu->id_ex.inst.rd : cpu->id_ex.inst.rt;
+    char next_buf[64];
+    disassembla(&tmp_stall, next_buf);
+    cpu->cycle_log_len +=
+        snprintf(cpu->cycle_log + cpu->cycle_log_len,
+                 sizeof(cpu->cycle_log) - cpu->cycle_log_len,
+                 "  !! STALL (load-use): LW destino $r%d usado por proxima "
+                 "instrucao [%s]\n",
+                 dest_lw, next_buf);
+    (void)s_stall;
+
     memset(id, 0, sizeof(Reg_IDEX));
     id->valida = 0;
     id->bolha = 1;
@@ -577,6 +598,14 @@ void estagio_ID(CPU *cpu) {
 void estagio_IF(CPU *cpu) {
   Reg_IFID *f = &cpu->if_id;
 
+  if (cpu->flush_pending == 1) {
+    f->valida = 0;
+    f->bolha = 1;
+    memset(&f->inst, 0, sizeof(Instrucao));
+    cpu->flush_pending = 0;
+    return;
+  }
+
   // Se stall ativo, PC não avanca, IF/ID mantem instrucao anterior
   if (cpu->stall) {
     return;
@@ -589,6 +618,7 @@ void estagio_IF(CPU *cpu) {
       f->pc_mais1 = cpu->pc + 1;
       f->valida = 1;
       f->bolha = 0;
+      cpu->stats.buscadas++;
     } else {
       // Fim das instrucoes: continua drenando o pipeline e incrementando o PC
       f->valida = 0;
@@ -611,8 +641,6 @@ void forwarding_unit(CPU *cpu) {
   char src_buf[64], dst_buf[64];
 
   // Forward para dado_rs (operando A)
-  // EX hazard: instrucao no EX/MEM escreve no reg que ID/EX precisa
-  // (ao fim do ciclo: fonte em MEM/WB, destino em EX/MEM)
   if (ex->valida && ex->s.esc_reg && ex->reg_dest != 0 &&
       ex->reg_dest == id->inst.rs) {
     id->dado_rs = ex->resultado_ula;
@@ -628,7 +656,6 @@ void forwarding_unit(CPU *cpu) {
         dst_buf, id->inst.rs, src_buf, ex->resultado_ula);
   }
   // MEM hazard: instrucao 2 ciclos atras escreve no reg
-  // (ao fim do ciclo: fonte ja completou WB, destino em EX/MEM)
   else if (wb->valida && wb->s.esc_reg && wb->reg_dest != 0 &&
            wb->reg_dest == id->inst.rs) {
     int val = wb->s.mem_para_reg ? wb->resultado_mem : wb->resultado_ula;
@@ -701,14 +728,7 @@ void detecta_hazard(CPU *cpu) {
 
     if ((usa_rs && tmp.rs == dest_lw) || (usa_rt && tmp.rt == dest_lw)) {
       cpu->stall = 1;
-      char next_buf[64];
-      disassembla(&tmp, next_buf);
-      cpu->cycle_log_len +=
-          snprintf(cpu->cycle_log + cpu->cycle_log_len,
-                   sizeof(cpu->cycle_log) - cpu->cycle_log_len,
-                   "  !! STALL (load-use): LW destino $r%d usado por proxima "
-                   "instrucao [%s]\n",
-                   dest_lw, next_buf);
+
     }
   }
 }
@@ -730,6 +750,8 @@ void salva_snap(CPU *cpu) {
   s->mem_wb = cpu->mem_wb;
   s->wb_last = cpu->wb_last;
   s->wb_last_valida = cpu->wb_last_valida;
+  s->stall = cpu->stall;
+  s->flush_pending = cpu->flush_pending;
   memcpy(s->cycle_log, cpu->cycle_log, sizeof(cpu->cycle_log));
   s->cycle_log_len = cpu->cycle_log_len;
   s->stats = cpu->stats;
@@ -753,12 +775,8 @@ void executa_ciclo(CPU *cpu) {
   cpu->ciclos++;
 
   // Detecta hazards DEPOIS dos estagios: prepara stall para o PROXIMO ciclo
-  // (simula logica combinacional que opera sobre os registradores atualizados)
   detecta_hazard(cpu);
 
-  // O programa deve continuar rodando até atingir a posição limite de instruções.
-  // Se o PC já alcançou o fim da memória, o pipeline continua drenando, mas não
-  // deve parar antes de chegar ao limite de 255 posições.
   if (cpu->pc >= MAX_MEM) {
     cpu->rodando = 0;
   }
@@ -787,6 +805,8 @@ void volta_ciclo(CPU *cpu) {
   cpu->mem_wb = s->mem_wb;
   cpu->wb_last = s->wb_last;
   cpu->wb_last_valida = s->wb_last_valida;
+  cpu->stall = s->stall;
+  cpu->flush_pending = s->flush_pending;
   memcpy(cpu->cycle_log, s->cycle_log, sizeof(cpu->cycle_log));
   cpu->cycle_log_len = s->cycle_log_len;
   cpu->stats = s->stats;
@@ -796,7 +816,7 @@ void volta_ciclo(CPU *cpu) {
   }
 }
 void reinicia(CPU *cpu) {
-  cpu->pc = cpu->ciclos = cpu->rodando = cpu->i_hist = cpu->stall = 0;
+  cpu->pc = cpu->ciclos = cpu->rodando = cpu->i_hist = cpu->stall = cpu->flush_pending = 0;
   memset(&cpu->if_id, 0, sizeof(Reg_IFID));
   memset(&cpu->id_ex, 0, sizeof(Reg_IDEX));
   memset(&cpu->ex_mem, 0, sizeof(Reg_EXMEM));
@@ -809,9 +829,7 @@ void reinicia(CPU *cpu) {
   if (cpu->mem_dados->dados)
     memset(cpu->mem_dados->dados, 0, MAX_MEM * sizeof(int));
   cpu->mem_dados->tamanho = 0;
-  if (cpu->mem_inst->inst)
-    memset(cpu->mem_inst->inst, 0, MAX_MEM * sizeof(Instrucao));
-  cpu->mem_inst->tamanho = 0;
+
   if (!cpu->quiet) {
     printf("Pipeline e memorias reinicializados.\n");
   }
@@ -997,9 +1015,10 @@ void print_pipeline(CPU *cpu) {
 void print_stats(CPU *cpu) {
   printf("\n======== ESTATISTICAS ========\n"
          "Ciclos totais: %d\n"
+         "Instrucoes buscadas: %d\n"
          "Instrucoes decodificadas: %d\n"
          "Instrucoes completas: %d\n",
-         cpu->ciclos, cpu->stats.total, cpu->stats.completas);
+         cpu->ciclos, cpu->stats.buscadas, cpu->stats.total, cpu->stats.completas);
   if (cpu->stats.completas > 0 && cpu->ciclos > 0) {
     printf("CPI: %.2f\n", (float)cpu->ciclos / (float)cpu->stats.completas);
   }
